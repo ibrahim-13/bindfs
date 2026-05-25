@@ -116,6 +116,9 @@ static const int64_t UID_T_MAX = ((1LL << (sizeof(uid_t)*8-1)) - 1);
 static const int64_t GID_T_MAX = ((1LL << (sizeof(gid_t)*8-1)) - 1);
 static const int UID_GID_OVERFLOW_ERRNO = EIO;
 
+/* Subdirectories whose first path component matches this pattern (case-insensitive) are blocked with 000 permissions */
+static const char *blocked_dir_pattern = ".git";
+
 /* SETTINGS */
 static struct Settings {
     const char *progname;
@@ -413,6 +416,22 @@ static char *process_path(const char *path, bool resolve_symlinks)
     } else {
         return strdup(path);
     }
+}
+
+static bool is_blocked_path(const char *path) {
+    size_t len = strlen(blocked_dir_pattern);
+    if (len == 0) return false;
+    const char *p = path;
+    while (*p) {
+        if (*p == '/') p++;
+        const char *end = p;
+        while (*end && *end != '/') end++;
+        size_t component_len = (size_t)(end - p);
+        if (component_len == len && strncasecmp(p, blocked_dir_pattern, len) == 0)
+            return true;
+        p = end;
+    }
+    return false;
 }
 
 static int getattr_common(const char *procpath, struct stat *stbuf)
@@ -774,6 +793,8 @@ static int bindfs_getattr(const char *path, struct stat *stbuf)
 
     res = getattr_common(real_path, stbuf);
     free(real_path);
+    if (res == 0 && is_blocked_path(path))
+        stbuf->st_mode &= ~0777;
     return res;
 }
 
@@ -794,6 +815,8 @@ static int bindfs_fgetattr(const char *path, struct stat *stbuf,
     }
     res = getattr_common(real_path, stbuf);
     free(real_path);
+    if (res == 0 && is_blocked_path(path))
+        stbuf->st_mode &= ~0777;
     return res;
 }
 #endif
